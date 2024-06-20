@@ -30,13 +30,37 @@ struct ContentView: View {
     @State private var showShareSheet = false
     @State private var iCalURL: URL?
     @State private var statusMessage: String?
+    @State private var highlightText: Bool = false
     
     var body: some View {
         VStack {
+            HStack {
+                Image(systemName: "bolt.fill")
+                    .foregroundColor(.red)
+                Text("Power Outages")
+                    .bold()
+                Image(systemName: "bolt.fill")
+                    .foregroundColor(.red)
+            }
+            .padding(.top, 20)
+            .font(.title)
+            
+            HStack {
+                Button(action: selectAllText) {
+                    Image(systemName: "selection.pin.in.out")
+                }
+                .padding(.trailing, 10)
+                
+                Button(action: pasteFromClipboard) {
+                    Image(systemName: "doc.on.clipboard")
+                }
+            }
+            .padding(.top, 10)
+            
             TextEditor(text: $text)
                 .frame(height: 300)
                 .padding()
-                .border(Color.gray, width: 1)
+                .border(highlightText ? Color.blue : Color.gray, width: 1)
             
             Picker("Select черга", selection: $selectedCherga) {
                 ForEach(1..<7) { number in
@@ -50,7 +74,13 @@ struct ContentView: View {
             .padding()
             
             HStack {
-                Button(action: { _ = createICalFile() }) {
+                Button(action: {
+#if targetEnvironment(macCatalyst)
+                    _ = generateICalFile()
+#else
+                    createEventsInCalendar()
+#endif
+                }) {
                     Text("To iCal")
                         .padding()
                         .background(Color.blue)
@@ -60,7 +90,7 @@ struct ContentView: View {
                 .padding()
                 
                 Button(action: {
-                    if createICalFile() {
+                    if generateICalFile() {
                         showShareSheet.toggle()
                     }
                 }) {
@@ -89,7 +119,74 @@ struct ContentView: View {
         .padding()
     }
     
-    func createICalFile() -> Bool {
+    func selectAllText() {
+        // Highlight the text field to indicate selection
+        highlightText = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            highlightText = false
+        }
+        print("Select All Text pressed")
+    }
+    
+    func pasteFromClipboard() {
+        if let clipboardText = UIPasteboard.general.string {
+            text = clipboardText
+        } else {
+            statusMessage = "No text in clipboard."
+        }
+    }
+    
+    func createEventsInCalendar() {
+        guard let date = extractDate(from: text) else {
+            statusMessage = "Failed to extract date from text."
+            print("Failed to extract date from text.")
+            return
+        }
+        let pattern = try! NSRegularExpression(pattern: "■ (\\d{2}:\\d{2})-(\\d{2}:\\d{2}).*\\b\(selectedCherga)\\b", options: .caseInsensitive)
+        let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+        
+        let calendar = Calendar(identifier: .gregorian)
+        let eventStore = EKEventStore()
+        eventStore.requestAccess(to: .event) { (granted, error) in
+            if granted {
+                for match in matches {
+                    let startRange = Range(match.range(at: 1), in: text)!
+                    let endRange = Range(match.range(at: 2), in: text)!
+                    let startTime = String(text[startRange])
+                    let endTime = String(text[endRange])
+                    
+                    var components = calendar.dateComponents([.year, .month, .day], from: date)
+                    components.hour = Int(startTime.prefix(2))
+                    components.minute = Int(startTime.suffix(2))
+                    let startDate = calendar.date(from: components)!
+                    
+                    components.hour = Int(endTime.prefix(2))
+                    components.minute = Int(endTime.suffix(2))
+                    let endDate = calendar.date(from: components)!
+                    
+                    let event = EKEvent(eventStore: eventStore)
+                    event.title = "Power outage"
+                    event.startDate = startDate
+                    event.endDate = endDate
+                    event.notes = "Power outage"
+                    event.calendar = eventStore.defaultCalendarForNewEvents
+                    
+                    do {
+                        try eventStore.save(event, span: .thisEvent)
+                    } catch {
+                        statusMessage = "Failed to save event with error: \(error)"
+                        print("Failed to save event with error: \(error)")
+                    }
+                }
+                statusMessage = "Events added to calendar"
+            } else {
+                statusMessage = "Access to calendar was denied."
+                print("Access to calendar was denied.")
+            }
+        }
+    }
+    
+    func generateICalFile() -> Bool {
         guard let date = extractDate(from: text) else {
             statusMessage = "Failed to extract date from text."
             print("Failed to extract date from text.")
@@ -99,9 +196,6 @@ struct ContentView: View {
         let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
         
         let calendar = Calendar(identifier: .gregorian)
-        
-#if targetEnvironment(macCatalyst)
-        // macOS (Catalyst) specific code: Generate iCal file
         var icsString = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Your Organization//Your Product//EN\n"
         
         for match in matches {
@@ -142,7 +236,7 @@ struct ContentView: View {
         icsString += "END:VCALENDAR"
         
         if let data = icsString.data(using: .utf8) {
-            let filename = getDocumentsDirectory().appendingPathComponent("power_outage_events.ics")
+            let filename             = getDocumentsDirectory().appendingPathComponent("power_outage_events.ics")
             do {
                 try data.write(to: filename)
                 iCalURL = filename
@@ -159,66 +253,6 @@ struct ContentView: View {
             print("Failed to encode iCal data.")
             return false
         }
-#else
-        // iOS specific code: Generate iCal file
-        var icsString = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Your Organization//Your Product//EN\n"
-        
-        for match in matches {
-            let startRange = Range(match.range(at: 1), in: text)!
-            let endRange = Range(match.range(at: 2), in: text)!
-            let startTime = String(text[startRange])
-            let endTime = String(text[endRange])
-            
-            var components = calendar.dateComponents([.year, .month, .day], from: date)
-            components.hour = Int(startTime.prefix(2))
-            components.minute = Int(startTime.suffix(2))
-            let startDate = calendar.date(from: components)!
-            
-            components.hour = Int(endTime.prefix(2))
-            components.minute = Int(endTime.suffix(2))
-            let endDate = calendar.date(from: components)!
-            
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-            dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-            
-            let startDateStr = dateFormatter.string(from: startDate)
-            let endDateStr = dateFormatter.string(from: endDate)
-            
-            icsString += """
-            BEGIN:VEVENT
-            UID:\(UUID().uuidString)
-            DTSTAMP:\(startDateStr)Z
-            DTSTART:\(startDateStr)Z
-            DTEND:\(endDateStr)Z
-            SUMMARY:Power outage
-            DESCRIPTION:Power outage
-            END:VEVENT
-            \n
-            """
-        }
-        
-        icsString += "END:VCALENDAR"
-        
-        if let data = icsString.data(using: .utf8) {
-            let filename = getDocumentsDirectory().appendingPathComponent("power_outage_events.ics")
-            do {
-                try data.write(to: filename)
-                iCalURL = filename
-                statusMessage = "iCal generated"
-                print("iCal file created at \(filename)")
-                return true
-            } catch {
-                statusMessage = "Failed to write iCal file."
-                print("Failed to write iCal file: \(error)")
-                return false
-            }
-        } else {
-            statusMessage = "Failed to encode iCal data."
-            print("Failed to encode iCal data.")
-            return false
-        }
-#endif
     }
     
     func getDocumentsDirectory() -> URL {
