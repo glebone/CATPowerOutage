@@ -4,23 +4,34 @@ import UIKit
 
 struct ContentView: View {
     @State private var text: String = """
-    ❗️ Черкащина. Маємо оновлену інформацію від енергетиків щодо графіків погодинних відключень електроенергії на сьогодні, 20 червня. Зверніть увагу: додано черги для знеструмленння. 
+    ❗️Черкащина. Графіки погодинних відключень електроенергії на четвер, 27 червня. 
     
     Години без світла: 
     
-    ■ 11:00-12:00  6 та 4 черги
-    ■ 12:00-13:00  6 та 4 черги
-    ■ 13:00-14:00  1 та 5 черги
-    ■ 14:00-15:00  1 та 5 черги
-    ■ 15:00-16:00  2 та 3 черги
+    ■ 00:00-01:00  4 та 5 черги
+    ■ 01:00-02:00  4 та 5 черги
+    ■ 02:00-03:00  6 та 1 черги
+    ■ 03:00-04:00  6 та 1 черги
+    ■ 04:00-05:00  2 та 3 черги
+    ■ 05:00-06:00  2 та 3 черги
+    ■ 06:00-07:00  4 та 5 черги
+    ■ 07:00-08:00  4 та 5 черги
+    ■ 08:00-09:00  6 та 1 черги
+    ■ 09:00-10:00  6 та 1 черги
+    ■ 10:00-11:00  2 та 3 черги
+    ■ 11:00-12:00  2 та 3 черги
+    ■ 12:00-13:00  4 та 5 черги
+    ■ 13:00-14:00  4 та 5 черги
+    ■ 14:00-15:00  6 та 1 черги
+    ■ 15:00-16:00  6 та 1 черги
     ■ 16:00-17:00  2 та 3 черги
-    ■ 17:00-18:00  4 та 5 черги
-    ■ 18:00-19:00  4 та 5 черги
-    ■ 19:00-20:00  6 та 1 черги
-    ■ 20:00-21:00  6 та 1 черги
-    ■ 21:00-22:00  2 та 3 черги
-    ■ 22:00-23:00  2 черга
-    ■ 23:00-24:00  4 черга
+    ■ 17:00-18:00  2, 3 та 4 черги
+    ■ 18:00-19:00  4, 5 та 6 черги
+    ■ 19:00-20:00  5, 6 та 1 черги
+    ■ 20:00-21:00  1, 2 та 3 черги
+    ■ 21:00-22:00  2, 3 та 4 черги
+    ■ 22:00-23:00  4, 5 та 6 черги
+    ■ 23:00-24:00  5 та 6 черги
     
     Telegram: 
     t.me/cherkaskaODA
@@ -31,6 +42,7 @@ struct ContentView: View {
     @State private var iCalURL: URL?
     @State private var statusMessage: String?
     @State private var highlightText: Bool = false
+    @State private var showClock = false
     
     var body: some View {
         VStack {
@@ -54,6 +66,14 @@ struct ContentView: View {
                 Button(action: pasteFromClipboard) {
                     Image(systemName: "doc.on.clipboard")
                 }
+                .padding(.trailing, 10)
+                
+                Button(action: {
+                    showClock.toggle()
+                }) {
+                    Image(systemName: "clock.fill")
+                }
+                .padding(.trailing, 10)
             }
             .padding(.top, 10)
             
@@ -61,6 +81,13 @@ struct ContentView: View {
                 .frame(height: 300)
                 .padding()
                 .border(highlightText ? Color.blue : Color.gray, width: 1)
+            
+            if showClock {
+                let caption = extractDateCaption(from: text) ?? "Unknown Date"
+                ClockView(outageTimes: parseOutageTimes(from: text, for: selectedCherga), caption: caption)
+                    .frame(height: 340)
+                    .padding()
+            }
             
             Picker("Select черга", selection: $selectedCherga) {
                 ForEach(1..<7) { number in
@@ -236,7 +263,7 @@ struct ContentView: View {
         icsString += "END:VCALENDAR"
         
         if let data = icsString.data(using: .utf8) {
-            let filename             = getDocumentsDirectory().appendingPathComponent("power_outage_events.ics")
+            let filename = getDocumentsDirectory().appendingPathComponent("power_outage_events.ics")
             do {
                 try data.write(to: filename)
                 iCalURL = filename
@@ -310,6 +337,67 @@ struct ContentView: View {
         let extractedDate = Calendar(identifier: .gregorian).date(from: components)
         print("Extracted date: \(String(describing: extractedDate))")
         return extractedDate
+    }
+    
+    func extractDateCaption(from text: String) -> String? {
+        let months: [String: String] = [
+            "січня": "January",
+            "лютого": "February",
+            "березня": "March",
+            "квітня": "April",
+            "травня": "May",
+            "червня": "June",
+            "липня": "July",
+            "серпня": "August",
+            "вересня": "September",
+            "жовтня": "October",
+            "листопада": "November",
+            "грудня": "December"
+        ]
+        
+        let pattern = "(\\d{1,2})\\s*(січня|лютого|березня|квітня|травня|червня|липня|серпня|вересня|жовтня|листопада|грудня)"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+            print("Failed to create regex.")
+            return nil
+        }
+        
+        let nsRange = NSRange(text.startIndex..<text.endIndex, in: text)
+        guard let match = regex.firstMatch(in: text, options: [], range: nsRange) else {
+            print("No date match found in text.")
+            return nil
+        }
+        
+        let dayRange = Range(match.range(at: 1), in: text)!
+        let monthRange = Range(match.range(at: 2), in: text)!
+        
+        guard let day = Int(text[dayRange]) else {
+            print("Failed to extract day.")
+            return nil
+        }
+        
+        let monthName = String(text[monthRange]).lowercased()
+        guard let month = months[monthName] else {
+            print("Failed to extract month.")
+            return nil
+        }
+        
+        return "\(day) \(month)"
+    }
+    
+    func parseOutageTimes(from text: String, for cherga: Int) -> [(start: String, end: String)] {
+        let pattern = try! NSRegularExpression(pattern: "■ (\\d{2}:\\d{2})-(\\d{2}:\\d{2}).*\\b\(cherga)\\b", options: .caseInsensitive)
+        let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+        var times = [(start: String, end: String)]()
+        
+        for match in matches {
+            let startRange = Range(match.range(at: 1), in: text)!
+            let endRange = Range(match.range(at: 2), in: text)!
+            let startTime = String(text[startRange])
+            let endTime = String(text[endRange])
+            times.append((start: startTime, end: endTime))
+        }
+        
+        return times
     }
 }
 
