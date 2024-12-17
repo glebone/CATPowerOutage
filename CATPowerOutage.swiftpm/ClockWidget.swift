@@ -27,6 +27,8 @@ private struct ClockSnapshotView: View {
 
     var body: some View {
         let subChergaText = subCherga == 1 ? "І підчерга" : "ІІ підчерга"
+        let (totalHours, totalMinutes) = totalOutageDuration(outageTimes: outageTimes)
+
         VStack {
             Text("Черга \(cherga) (\(subChergaText))")
                 .font(.headline)
@@ -107,8 +109,13 @@ private struct ClockSnapshotView: View {
             }
             .aspectRatio(1, contentMode: .fit)
             .background(Color.white)
+            
+            // Total outage duration
+            Text("Загальна тривалість: \(totalHours) год \(totalMinutes) хв")
+                .font(.subheadline)
+                .padding(.top, 10)
         }
-        .frame(width: 300, height: 360)
+        .frame(width: 300, height: 400) // Increased height to accommodate duration text
     }
 
     func timeInOutage(index: Int, outageTimes: [(start: String, end: String)]) -> Bool {
@@ -137,6 +144,29 @@ private struct ClockSnapshotView: View {
         }
         return false
     }
+
+    func totalOutageDuration(outageTimes: [(start: String, end: String)]) -> (Int, Int) {
+        var totalMinutes = 0
+        for time in outageTimes {
+            if let startHour = Int(time.start.prefix(2)),
+               let startMinute = Int(time.start.suffix(2)),
+               let endHour = Int(time.end.prefix(2)),
+               let endMinute = Int(time.end.suffix(2)) {
+                let startTotal = startHour * 60 + startMinute
+                let endTotal = endHour * 60 + endMinute
+                // If end < start, wrap around midnight scenario
+                if endTotal >= startTotal {
+                    totalMinutes += (endTotal - startTotal)
+                } else {
+                    // Wraps to next day
+                    totalMinutes += ((24*60 - startTotal) + endTotal)
+                }
+            }
+        }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return (hours, minutes)
+    }
 }
 
 struct ClockView: View {
@@ -152,6 +182,7 @@ struct ClockView: View {
 
     var body: some View {
         let subChergaText = subCherga == 1 ? "І підчерга" : "ІІ підчерга"
+        let (totalHours, totalMinutes) = totalOutageDuration(outageTimes: outageTimes)
 
         VStack {
             // Show captions and chart in the live UI
@@ -235,6 +266,11 @@ struct ClockView: View {
             .aspectRatio(1, contentMode: .fit)
             .background(Color.white)
 
+            // Show total outage duration beneath the chart
+            Text("Загальна тривалість: \(totalHours) год \(totalMinutes) хв")
+                .font(.subheadline)
+                .padding(.top, 10)
+
             // The button is only in the live view, not in the snapshot
             Button(action: shareClockImage) {
                 Text("Share as PNG")
@@ -274,8 +310,31 @@ struct ClockView: View {
         return false
     }
 
+    func totalOutageDuration(outageTimes: [(start: String, end: String)]) -> (Int, Int) {
+        var totalMinutes = 0
+        for time in outageTimes {
+            if let startHour = Int(time.start.prefix(2)),
+               let startMinute = Int(time.start.suffix(2)),
+               let endHour = Int(time.end.prefix(2)),
+               let endMinute = Int(time.end.suffix(2)) {
+                let startTotal = startHour * 60 + startMinute
+                let endTotal = endHour * 60 + endMinute
+                // If end < start, wrap around midnight scenario
+                if endTotal >= startTotal {
+                    totalMinutes += (endTotal - startTotal)
+                } else {
+                    // Wraps to next day
+                    totalMinutes += ((24*60 - startTotal) + endTotal)
+                }
+            }
+        }
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+        return (hours, minutes)
+    }
+
     func shareClockImage() {
-        let size = CGSize(width: 300, height: 360)
+        let size = CGSize(width: 300, height: 400) // Increased height to match snapshot changes
         // Use ClockSnapshotView instead of embedding ClockView again
         let snapshotView = ClockSnapshotView(
             cherga: cherga,
