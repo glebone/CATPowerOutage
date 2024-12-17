@@ -95,8 +95,8 @@ struct ContentView: View {
                 }
             }
             .pickerStyle(SegmentedPickerStyle())
-            .onChange(of: selectedCherga) { value in
-                UserDefaults.standard.set(value, forKey: "selectedCherga")
+            .onChange(of: selectedCherga) {
+                UserDefaults.standard.set(selectedCherga, forKey: "selectedCherga")
             }
             .padding()
             
@@ -174,7 +174,7 @@ struct ContentView: View {
         
         let calendar = Calendar(identifier: .gregorian)
         let eventStore = EKEventStore()
-        eventStore.requestAccess(to: .event) { (granted, error) in
+        eventStore.requestFullAccessToEvents { granted, error in
             if granted {
                 for match in matches {
                     let startRange = Range(match.range(at: 1), in: text)!
