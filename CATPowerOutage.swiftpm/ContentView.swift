@@ -4,40 +4,20 @@ import UIKit
 
 struct ContentView: View {
     @State private var text: String = """
-    ❗️Черкащина. Графіки погодинних відключень електроенергії на четвер, 27 червня. 
-    
-    Години без світла: 
-    
-    ■ 00:00-01:00  4 та 5 черги
-    ■ 01:00-02:00  4 та 5 черги
-    ■ 02:00-03:00  6 та 1 черги
-    ■ 03:00-04:00  6 та 1 черги
-    ■ 04:00-05:00  2 та 3 черги
-    ■ 05:00-06:00  2 та 3 черги
-    ■ 06:00-07:00  4 та 5 черги
-    ■ 07:00-08:00  4 та 5 черги
-    ■ 08:00-09:00  6 та 1 черги
-    ■ 09:00-10:00  6 та 1 черги
-    ■ 10:00-11:00  2 та 3 черги
-    ■ 11:00-12:00  2 та 3 черги
-    ■ 12:00-13:00  4 та 5 черги
-    ■ 13:00-14:00  4 та 5 черги
-    ■ 14:00-15:00  6 та 1 черги
-    ■ 15:00-16:00  6 та 1 черги
-    ■ 16:00-17:00  2 та 3 черги
-    ■ 17:00-18:00  2, 3 та 4 черги
-    ■ 18:00-19:00  4, 5 та 6 черги
-    ■ 19:00-20:00  5, 6 та 1 черги
-    ■ 20:00-21:00  1, 2 та 3 черги
-    ■ 21:00-22:00  2, 3 та 4 черги
-    ■ 22:00-23:00  4, 5 та 6 черги
-    ■ 23:00-24:00  5 та 6 черги
-    
-    Telegram: 
+    ❗️💡Черкащина. Відповідно до команди НЕК "Укренерго", у середу, 18 грудня, в області будуть застосовані графіки погодинних відключень електроенергії.
+
+    Години без світла:
+
+    ■ 1 черга (ІІ підчерга) 07:00-10:30
+    ■ 2 черга (І підчерга) 17:30-20:00
+    ■ 3 черга (ІІ підчерга) 10:30-14:00
+    ■ 5 черга (ІІ підчерга) 14:00-17:30
+
     t.me/cherkaskaODA
     """
     
-    @State private var selectedCherga: Int = UserDefaults.standard.integer(forKey: "selectedCherga") == 0 ? 3 : UserDefaults.standard.integer(forKey: "selectedCherga")
+    @State private var selectedCherga: Int = UserDefaults.standard.integer(forKey: "selectedCherga") == 0 ? 1 : UserDefaults.standard.integer(forKey: "selectedCherga")
+    @State private var selectedSubCherga: Int = UserDefaults.standard.integer(forKey: "selectedSubCherga") == 0 ? 1 : UserDefaults.standard.integer(forKey: "selectedSubCherga")
     @State private var showShareSheet = false
     @State private var iCalURL: URL?
     @State private var statusMessage: String?
@@ -84,11 +64,17 @@ struct ContentView: View {
             
             if showClock {
                 let caption = extractDateCaption(from: text) ?? "Unknown Date"
-                ClockView(outageTimes: parseOutageTimes(from: text, for: selectedCherga), caption: caption)
-                    .frame(height: 340)
-                    .padding()
+                ClockView(
+                    cherga: selectedCherga,
+                    subCherga: selectedSubCherga,
+                    outageTimes: parseOutageTimes(from: text, for: selectedCherga, subCherga: selectedSubCherga),
+                    caption: caption
+                )
+                .frame(height: 340)
+                .padding()
             }
             
+            // Main Черга picker
             Picker("Select черга", selection: $selectedCherga) {
                 ForEach(1..<7) { number in
                     Text("\(number)").tag(number)
@@ -97,6 +83,17 @@ struct ContentView: View {
             .pickerStyle(SegmentedPickerStyle())
             .onChange(of: selectedCherga) {
                 UserDefaults.standard.set(selectedCherga, forKey: "selectedCherga")
+            }
+            .padding()
+            
+            // Підчерга picker
+            Picker("Select підчерга", selection: $selectedSubCherga) {
+                Text("I").tag(1)
+                Text("II").tag(2)
+            }
+            .pickerStyle(SegmentedPickerStyle())
+            .onChange(of: selectedSubCherga) {
+                UserDefaults.standard.set(selectedSubCherga, forKey: "selectedSubCherga")
             }
             .padding()
             
@@ -147,7 +144,6 @@ struct ContentView: View {
     }
     
     func selectAllText() {
-        // Highlight the text field to indicate selection
         highlightText = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             highlightText = false
@@ -169,45 +165,55 @@ struct ContentView: View {
             print("Failed to extract date from text.")
             return
         }
-        let pattern = try! NSRegularExpression(pattern: "■ (\\d{2}:\\d{2})-(\\d{2}:\\d{2}).*\\b\(selectedCherga)\\b", options: .caseInsensitive)
-        let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+        
+        let subChergaPattern = (selectedSubCherga == 1) ? "І" : "ІІ"
+        let pattern = "■\\s*(\\d+)\\s*черга\\s*\\(\(subChergaPattern)\\s*підчерга\\)\\s*(\\d{2}:\\d{2})-(\\d{2}:\\d{2})"
+        let regex = try! NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
         
         let calendar = Calendar(identifier: .gregorian)
         let eventStore = EKEventStore()
         eventStore.requestFullAccessToEvents { granted, error in
             if granted {
                 for match in matches {
-                    let startRange = Range(match.range(at: 1), in: text)!
-                    let endRange = Range(match.range(at: 2), in: text)!
-                    let startTime = String(text[startRange])
-                    let endTime = String(text[endRange])
+                    guard let queueRange = Range(match.range(at: 1), in: text),
+                          let startRange = Range(match.range(at: 2), in: text),
+                          let endRange = Range(match.range(at: 3), in: text) else {
+                        continue
+                    }
                     
-                    var components = calendar.dateComponents([.year, .month, .day], from: date)
-                    components.hour = Int(startTime.prefix(2))
-                    components.minute = Int(startTime.suffix(2))
-                    let startDate = calendar.date(from: components)!
-                    
-                    components.hour = Int(endTime.prefix(2))
-                    components.minute = Int(endTime.suffix(2))
-                    let endDate = calendar.date(from: components)!
-                    
-                    let event = EKEvent(eventStore: eventStore)
-                    event.title = "Power outage"
-                    event.startDate = startDate
-                    event.endDate = endDate
-                    event.notes = "Power outage"
-                    event.calendar = eventStore.defaultCalendarForNewEvents
-                    
-                    do {
-                        try eventStore.save(event, span: .thisEvent)
-                    } catch {
-                        statusMessage = "Failed to save event with error: \(error)"
-                        print("Failed to save event with error: \(error)")
+                    let foundQueue = Int(text[queueRange]) ?? 0
+                    if foundQueue == self.selectedCherga {
+                        let startTime = String(text[startRange])
+                        let endTime = String(text[endRange])
+                        
+                        var components = calendar.dateComponents([.year, .month, .day], from: date)
+                        components.hour = Int(startTime.prefix(2))
+                        components.minute = Int(startTime.suffix(2))
+                        let startDate = calendar.date(from: components)!
+                        
+                        components.hour = Int(endTime.prefix(2))
+                        components.minute = Int(endTime.suffix(2))
+                        let endDate = calendar.date(from: components)!
+                        
+                        let event = EKEvent(eventStore: eventStore)
+                        event.title = "Power outage"
+                        event.startDate = startDate
+                        event.endDate = endDate
+                        event.notes = "Power outage"
+                        event.calendar = eventStore.defaultCalendarForNewEvents
+                        
+                        do {
+                            try eventStore.save(event, span: .thisEvent)
+                        } catch {
+                            self.statusMessage = "Failed to save event with error: \(error)"
+                            print("Failed to save event with error: \(error)")
+                        }
                     }
                 }
-                statusMessage = "Events added to calendar"
+                self.statusMessage = "Events added to calendar"
             } else {
-                statusMessage = "Access to calendar was denied."
+                self.statusMessage = "Access to calendar was denied."
                 print("Access to calendar was denied.")
             }
         }
@@ -219,45 +225,59 @@ struct ContentView: View {
             print("Failed to extract date from text.")
             return false
         }
-        let pattern = try! NSRegularExpression(pattern: "■ (\\d{2}:\\d{2})-(\\d{2}:\\d{2}).*\\b\(selectedCherga)\\b", options: .caseInsensitive)
-        let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+        
+        let subChergaPattern = (selectedSubCherga == 1) ? "І" : "ІІ"
+        let pattern = "■\\s*(\\d+)\\s*черга\\s*\\(\(subChergaPattern)\\s*підчерга\\)\\s*(\\d{2}:\\d{2})-(\\d{2}:\\d{2})"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+            print("Failed to create regex.")
+            return false
+        }
+        
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
         
         let calendar = Calendar(identifier: .gregorian)
         var icsString = "BEGIN:VCALENDAR\nVERSION:2.0\nPRODID:-//Your Organization//Your Product//EN\n"
         
         for match in matches {
-            let startRange = Range(match.range(at: 1), in: text)!
-            let endRange = Range(match.range(at: 2), in: text)!
-            let startTime = String(text[startRange])
-            let endTime = String(text[endRange])
+            guard let queueRange = Range(match.range(at: 1), in: text),
+                  let startRange = Range(match.range(at: 2), in: text),
+                  let endRange = Range(match.range(at: 3), in: text) else {
+                continue
+            }
             
-            var components = calendar.dateComponents([.year, .month, .day], from: date)
-            components.hour = Int(startTime.prefix(2))
-            components.minute = Int(startTime.suffix(2))
-            let startDate = calendar.date(from: components)!
-            
-            components.hour = Int(endTime.prefix(2))
-            components.minute = Int(endTime.suffix(2))
-            let endDate = calendar.date(from: components)!
-            
-            let dateFormatter = DateFormatter()
-            dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
-            dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-            
-            let startDateStr = dateFormatter.string(from: startDate)
-            let endDateStr = dateFormatter.string(from: endDate)
-            
-            icsString += """
-            BEGIN:VEVENT
-            UID:\(UUID().uuidString)
-            DTSTAMP:\(startDateStr)Z
-            DTSTART:\(startDateStr)Z
-            DTEND:\(endDateStr)Z
-            SUMMARY:Power outage
-            DESCRIPTION:Power outage
-            END:VEVENT
-            \n
-            """
+            let foundQueue = Int(text[queueRange]) ?? 0
+            if foundQueue == selectedCherga {
+                let startTime = String(text[startRange])
+                let endTime = String(text[endRange])
+                
+                var components = calendar.dateComponents([.year, .month, .day], from: date)
+                components.hour = Int(startTime.prefix(2))
+                components.minute = Int(startTime.suffix(2))
+                let startDate = calendar.date(from: components)!
+                
+                components.hour = Int(endTime.prefix(2))
+                components.minute = Int(endTime.suffix(2))
+                let endDate = calendar.date(from: components)!
+                
+                let dateFormatter = DateFormatter()
+                dateFormatter.dateFormat = "yyyyMMdd'T'HHmmss"
+                dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+                
+                let startDateStr = dateFormatter.string(from: startDate)
+                let endDateStr = dateFormatter.string(from: endDate)
+                
+                icsString += """
+                BEGIN:VEVENT
+                UID:\(UUID().uuidString)
+                DTSTAMP:\(startDateStr)Z
+                DTSTART:\(startDateStr)Z
+                DTEND:\(endDateStr)Z
+                SUMMARY:Power outage
+                DESCRIPTION:Power outage
+                END:VEVENT
+
+                """
+            }
         }
         
         icsString += "END:VCALENDAR"
@@ -330,7 +350,7 @@ struct ContentView: View {
         }
         
         var components = DateComponents()
-        components.year = 2024
+        components.year = 2024 // Adjust year if needed
         components.month = month
         components.day = day
         
@@ -384,17 +404,30 @@ struct ContentView: View {
         return "\(day) \(month)"
     }
     
-    func parseOutageTimes(from text: String, for cherga: Int) -> [(start: String, end: String)] {
-        let pattern = try! NSRegularExpression(pattern: "■ (\\d{2}:\\d{2})-(\\d{2}:\\d{2}).*\\b\(cherga)\\b", options: .caseInsensitive)
-        let matches = pattern.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
+    func parseOutageTimes(from text: String, for cherga: Int, subCherga: Int) -> [(start: String, end: String)] {
+        let subChergaPattern = (subCherga == 1) ? "І" : "ІІ"
+        let pattern = "■\\s*(\\d+)\\s*черга\\s*\\(\(subChergaPattern)\\s*підчерга\\)\\s*(\\d{2}:\\d{2})-(\\d{2}:\\d{2})"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive) else {
+            print("Failed to create regex.")
+            return []
+        }
+        
+        let matches = regex.matches(in: text, options: [], range: NSRange(location: 0, length: text.utf16.count))
         var times = [(start: String, end: String)]()
         
         for match in matches {
-            let startRange = Range(match.range(at: 1), in: text)!
-            let endRange = Range(match.range(at: 2), in: text)!
-            let startTime = String(text[startRange])
-            let endTime = String(text[endRange])
-            times.append((start: startTime, end: endTime))
+            guard let queueRange = Range(match.range(at: 1), in: text),
+                  let startRange = Range(match.range(at: 2), in: text),
+                  let endRange = Range(match.range(at: 3), in: text) else {
+                continue
+            }
+            
+            let foundQueue = Int(text[queueRange]) ?? 0
+            if foundQueue == cherga {
+                let startTime = String(text[startRange])
+                let endTime = String(text[endRange])
+                times.append((start: startTime, end: endTime))
+            }
         }
         
         return times

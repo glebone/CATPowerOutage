@@ -1,58 +1,241 @@
 import SwiftUI
+import UIKit
 
-struct ClockView: View {
+extension UIViewController {
+    func topmostViewController() -> UIViewController {
+        if let presented = self.presentedViewController {
+            return presented.topmostViewController()
+        }
+        if let nav = self as? UINavigationController {
+            return nav.visibleViewController?.topmostViewController() ?? nav
+        }
+        if let tab = self as? UITabBarController {
+            return tab.selectedViewController?.topmostViewController() ?? tab
+        }
+        return self
+    }
+}
+
+// A separate view for snapshotting to PNG (no button, no recursion)
+private struct ClockSnapshotView: View {
+    var cherga: Int
+    var subCherga: Int
     var outageTimes: [(start: String, end: String)]
-    var nonOutageColor: Color = .green
-    var outageColor: Color = .red
     var caption: String
-    
-    @State private var showShareSheet = false
-    @State private var generatedImage: UIImage? = nil
-    
+    var nonOutageColor: Color
+    var outageColor: Color
+
     var body: some View {
+        let subChergaText = subCherga == 1 ? "І підчерга" : "ІІ підчерга"
         VStack {
+            Text("Черга \(cherga) (\(subChergaText))")
+                .font(.headline)
+                .padding(.bottom, 2)
+
             Text(caption)
                 .font(.headline)
                 .padding(.bottom, 10)
-            
+
             GeometryReader { geometry in
                 let radius = min(geometry.size.width, geometry.size.height) / 2
                 let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
-                
+
                 ZStack {
                     Circle()
                         .stroke(lineWidth: 2)
                         .foregroundColor(.gray)
-                    
-                    ForEach(0..<24) { index in
-                        let hour = index
-                        let startAngle = Angle.degrees(Double(index) / 24.0 * 360.0 - 90)
-                        let endAngle = Angle.degrees(Double(index + 1) / 24.0 * 360.0 - 90)
-                        
+
+                    ForEach(0..<48) { index in
+                        let startAngle = Angle.degrees(Double(index) / 48.0 * 360.0 - 90)
+                        let endAngle = Angle.degrees(Double(index + 1) / 48.0 * 360.0 - 90)
+
+                        let isOutage = timeInOutage(index: index, outageTimes: outageTimes)
+
                         Path { path in
                             path.move(to: center)
-                            path.addArc(center: center, radius: radius, startAngle: startAngle, endAngle: endAngle, clockwise: false)
+                            path.addArc(center: center, radius: radius,
+                                        startAngle: startAngle,
+                                        endAngle: endAngle, clockwise: false)
                             path.closeSubpath()
                         }
-                        .fill(hourInOutage(hour: hour) ? outageColor : nonOutageColor)
-                        
-                        // Add numbers
-                        let numberAngle = Angle.degrees(Double(index) / 24.0 * 360.0 - 90)
-                        let numberPosition = CGPoint(
-                            x: center.x + radius * 0.85 * cos(CGFloat(numberAngle.radians)),
-                            y: center.y + radius * 0.85 * sin(CGFloat(numberAngle.radians))
-                        )
-                        
-                        Text("\(hour)")
-                            .font(.system(size: 10))
-                            .position(numberPosition)
-                            .foregroundColor(.black)
+                        .fill(isOutage ? outageColor : nonOutageColor)
+
+                        // Label hours on even indices
+                        if index % 2 == 0 {
+                            let hour = index / 2
+                            let numberAngle = Angle.degrees(Double(index) / 48.0 * 360.0 - 90)
+                            let numberPosition = CGPoint(
+                                x: center.x + radius * 0.85 * cos(CGFloat(numberAngle.radians)),
+                                y: center.y + radius * 0.85 * sin(CGFloat(numberAngle.radians))
+                            )
+
+                            Text("\(hour)")
+                                .font(.system(size: 10))
+                                .position(numberPosition)
+                                .foregroundColor(.black)
+                        }
+                    }
+
+                    // Hour dividers
+                    ForEach(0..<24) { hourMark in
+                        let angle = Angle.degrees(Double(hourMark) / 24.0 * 360.0 - 90)
+                        Path { path in
+                            path.move(to: center)
+                            path.addLine(to: CGPoint(
+                                x: center.x + radius * cos(CGFloat(angle.radians)),
+                                y: center.y + radius * sin(CGFloat(angle.radians))
+                            ))
+                        }
+                        .stroke(Color.black, lineWidth: 1)
+                    }
+
+                    // Half-hour dividers
+                    ForEach(0..<48) { halfMark in
+                        if halfMark % 2 != 0 {
+                            let angle = Angle.degrees(Double(halfMark) / 48.0 * 360.0 - 90)
+                            Path { path in
+                                path.move(to: center)
+                                path.addLine(to: CGPoint(
+                                    x: center.x + radius * cos(CGFloat(angle.radians)),
+                                    y: center.y + radius * sin(CGFloat(angle.radians))
+                                ))
+                            }
+                            .stroke(Color.black.opacity(0.3), lineWidth: 0.5)
+                        }
                     }
                 }
             }
             .aspectRatio(1, contentMode: .fit)
-            .background(Color.white) // Background color for the image
-            
+            .background(Color.white)
+        }
+        .frame(width: 300, height: 360)
+    }
+
+    func timeInOutage(index: Int, outageTimes: [(start: String, end: String)]) -> Bool {
+        let segmentMinutes = index * 30
+        for time in outageTimes {
+            guard let startHour = Int(time.start.prefix(2)),
+                  let startMinute = Int(time.start.suffix(2)),
+                  let endHour = Int(time.end.prefix(2)),
+                  let endMinute = Int(time.end.suffix(2)) else {
+                continue
+            }
+
+            let startTotal = startHour * 60 + startMinute
+            let endTotal = endHour * 60 + endMinute
+
+            if startTotal <= endTotal {
+                if segmentMinutes >= startTotal && segmentMinutes < endTotal {
+                    return true
+                }
+            } else {
+                // wraps past midnight
+                if segmentMinutes >= startTotal || segmentMinutes < endTotal {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+}
+
+struct ClockView: View {
+    var cherga: Int
+    var subCherga: Int
+    var outageTimes: [(start: String, end: String)]
+    var nonOutageColor: Color = .green
+    var outageColor: Color = .red
+    var caption: String
+
+    @State private var showShareSheet = false
+    @State private var generatedImage: UIImage? = nil
+
+    var body: some View {
+        let subChergaText = subCherga == 1 ? "І підчерга" : "ІІ підчерга"
+
+        VStack {
+            // Show captions and chart in the live UI
+            Text("Черга \(cherga) (\(subChergaText))")
+                .font(.headline)
+                .padding(.bottom, 2)
+
+            Text(caption)
+                .font(.headline)
+                .padding(.bottom, 10)
+
+            GeometryReader { geometry in
+                let radius = min(geometry.size.width, geometry.size.height) / 2
+                let center = CGPoint(x: geometry.size.width / 2, y: geometry.size.height / 2)
+
+                ZStack {
+                    Circle()
+                        .stroke(lineWidth: 2)
+                        .foregroundColor(.gray)
+
+                    ForEach(0..<48) { index in
+                        let startAngle = Angle.degrees(Double(index) / 48.0 * 360.0 - 90)
+                        let endAngle = Angle.degrees(Double(index + 1) / 48.0 * 360.0 - 90)
+
+                        let isOutage = timeInOutage(index: index)
+
+                        Path { path in
+                            path.move(to: center)
+                            path.addArc(center: center, radius: radius,
+                                        startAngle: startAngle,
+                                        endAngle: endAngle, clockwise: false)
+                            path.closeSubpath()
+                        }
+                        .fill(isOutage ? outageColor : nonOutageColor)
+
+                        // Label hours on even indices
+                        if index % 2 == 0 {
+                            let hour = index / 2
+                            let numberAngle = Angle.degrees(Double(index) / 48.0 * 360.0 - 90)
+                            let numberPosition = CGPoint(
+                                x: center.x + radius * 0.85 * cos(CGFloat(numberAngle.radians)),
+                                y: center.y + radius * 0.85 * sin(CGFloat(numberAngle.radians))
+                            )
+
+                            Text("\(hour)")
+                                .font(.system(size: 10))
+                                .position(numberPosition)
+                                .foregroundColor(.black)
+                        }
+                    }
+
+                    // Hour dividers
+                    ForEach(0..<24) { hourMark in
+                        let angle = Angle.degrees(Double(hourMark) / 24.0 * 360.0 - 90)
+                        Path { path in
+                            path.move(to: center)
+                            path.addLine(to: CGPoint(
+                                x: center.x + radius * cos(CGFloat(angle.radians)),
+                                y: center.y + radius * sin(CGFloat(angle.radians))
+                            ))
+                        }
+                        .stroke(Color.black, lineWidth: 1)
+                    }
+
+                    // Half-hour dividers
+                    ForEach(0..<48) { halfMark in
+                        if halfMark % 2 != 0 {
+                            let angle = Angle.degrees(Double(halfMark) / 48.0 * 360.0 - 90)
+                            Path { path in
+                                path.move(to: center)
+                                path.addLine(to: CGPoint(
+                                    x: center.x + radius * cos(CGFloat(angle.radians)),
+                                    y: center.y + radius * sin(CGFloat(angle.radians))
+                                ))
+                            }
+                            .stroke(Color.black.opacity(0.3), lineWidth: 0.5)
+                        }
+                    }
+                }
+            }
+            .aspectRatio(1, contentMode: .fit)
+            .background(Color.white)
+
+            // The button is only in the live view, not in the snapshot
             Button(action: shareClockImage) {
                 Text("Share as PNG")
                     .padding()
@@ -61,57 +244,77 @@ struct ClockView: View {
                     .cornerRadius(8)
             }
             .padding()
-            .sheet(isPresented: $showShareSheet) {
-                if let image = generatedImage {
-                    ActivityView(activityItems: [image])
-                }
-            }
         }
     }
-    
-    func hourInOutage(hour: Int) -> Bool {
+
+    func timeInOutage(index: Int) -> Bool {
+        let segmentMinutes = index * 30
         for time in outageTimes {
-            let startHour = Int(time.start.prefix(2))!
-            let endHour = Int(time.end.prefix(2))!
-            
-            if startHour <= endHour {
-                if hour >= startHour && hour < endHour {
+            guard let startHour = Int(time.start.prefix(2)),
+                  let startMinute = Int(time.start.suffix(2)),
+                  let endHour = Int(time.end.prefix(2)),
+                  let endMinute = Int(time.end.suffix(2)) else {
+                continue
+            }
+
+            let startTotal = startHour * 60 + startMinute
+            let endTotal = endHour * 60 + endMinute
+
+            if startTotal <= endTotal {
+                if segmentMinutes >= startTotal && segmentMinutes < endTotal {
                     return true
                 }
-            } else { // For cases where the outage spans midnight
-                if hour >= startHour || hour < endHour {
+            } else {
+                // wraps past midnight
+                if segmentMinutes >= startTotal || segmentMinutes < endTotal {
                     return true
                 }
             }
         }
         return false
     }
-    
+
     func shareClockImage() {
-        let renderer = UIGraphicsImageRenderer(size: CGSize(width: 300, height: 340)) // Include space for caption
-        let image = renderer.image { ctx in
-            let hostingController = UIHostingController(rootView: VStack {
-                Text(caption)
-                    .font(.headline)
-                    .padding(.bottom, 10)
-                ClockView(outageTimes: outageTimes, nonOutageColor: nonOutageColor, outageColor: outageColor, caption: caption)
-                    .frame(width: 300, height: 300)
-            }.frame(width: 300, height: 340))
-            hostingController.view.bounds = CGRect(x: 0, y: 0, width: 300, height: 340)
-            hostingController.view.backgroundColor = .white
-            hostingController.view.drawHierarchy(in: hostingController.view.bounds, afterScreenUpdates: true)
+        let size = CGSize(width: 300, height: 360)
+        // Use ClockSnapshotView instead of embedding ClockView again
+        let snapshotView = ClockSnapshotView(
+            cherga: cherga,
+            subCherga: subCherga,
+            outageTimes: outageTimes,
+            caption: caption,
+            nonOutageColor: nonOutageColor,
+            outageColor: outageColor
+        )
+
+        let hostingController = UIHostingController(rootView: snapshotView)
+        let tempWindow = UIWindow(frame: CGRect(origin: .zero, size: size))
+        tempWindow.rootViewController = hostingController
+        tempWindow.makeKeyAndVisible()
+        hostingController.view.layoutIfNeeded()
+
+        DispatchQueue.main.async {
+            UIGraphicsBeginImageContextWithOptions(size, false, 0)
+            if let context = UIGraphicsGetCurrentContext() {
+                hostingController.view.layer.render(in: context)
+                let image = UIGraphicsGetImageFromCurrentImageContext()
+                UIGraphicsEndImageContext()
+
+                self.generatedImage = image
+
+                guard let imageToShare = self.generatedImage else { return }
+                let activityVC = UIActivityViewController(activityItems: [imageToShare], applicationActivities: nil)
+
+                if let rootVC = UIApplication.shared.windows.first?.rootViewController?.topmostViewController() {
+                    activityVC.popoverPresentationController?.sourceView = rootVC.view
+                    activityVC.popoverPresentationController?.sourceRect = CGRect(x: rootVC.view.bounds.midX,
+                                                                                  y: rootVC.view.bounds.midY,
+                                                                                  width: 0, height: 0)
+                    activityVC.popoverPresentationController?.permittedArrowDirections = []
+                    rootVC.present(activityVC, animated: true, completion: nil)
+                }
+            } else {
+                UIGraphicsEndImageContext()
+            }
         }
-        
-        generatedImage = image
-        showShareSheet = true
-    }
-}
-
-
-
-struct ClockView_Previews: PreviewProvider {
-    static var previews: some View {
-        ClockView(outageTimes: [("10:00", "12:00"), ("16:00", "18:00")], caption: "27 June")
-            .frame(width: 300, height: 340)
     }
 }
